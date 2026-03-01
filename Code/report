@@ -1,0 +1,572 @@
+"""
+STEP 5: Evaluation & Business Insights Report
+-----------------------------------------------
+Purpose : Combines overall sentiment results and aspect-based results into
+          a unified business insights report. Answers the core business
+          questions we set out to address:
+          1. What is the overall customer attitude toward PC products?
+          2. Which specific aspects do customers rate highly or poorly?
+          3. What specific, evidence-backed strategies should the business act on?
+
+Input   : test.csv, aspect_sentiment_results.csv, aspect_summary.csv
+Output  : business_insights_report.txt + visualizations
+"""
+
+import pandas as pd
+import json
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+from step3_overall_sentiment import predict_sentiment
+import warnings
+warnings.filterwarnings('ignore')
+
+# ── Configuration ────────────────────────────────────────────────────────────
+TEST_FILE           = "test.csv"
+ASPECT_RESULTS_FILE = "aspect_sentiment_results.csv"
+ASPECT_SUMMARY_FILE = "aspect_summary.csv"
+REPORT_FILE         = "business_insights_report.txt"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── 1. Overall Sentiment Report ───────────────────────────────────────────────
+
+def overall_sentiment_report(test_df):
+    """Generates overall sentiment distribution statistics."""
+    print("Generating overall sentiment predictions...")
+    results = predict_sentiment(test_df['full_text'].tolist())
+    test_df['predicted_sentiment'] = [r['sentiment'] for r in results]
+    test_df['confidence']          = [r['confidence'] for r in results]
+
+    distribution = test_df['predicted_sentiment'].value_counts(normalize=True) * 100
+
+    report_lines = [
+        "═══════════════════════════════════════════════════════",
+        "       PC PRODUCT SENTIMENT ANALYSIS — BUSINESS REPORT ",
+        "═══════════════════════════════════════════════════════",
+        "",
+        "── 1. OVERALL CUSTOMER SENTIMENT ──────────────────────",
+        f"   Total reviews analyzed : {len(test_df):,}",
+        ""
+    ]
+    for label in ['positive', 'neutral', 'negative']:
+        pct = distribution.get(label, 0)
+        bar = '█' * int(pct / 2)
+        report_lines.append(f"   {label.capitalize():10s} : {pct:5.1f}%  {bar}")
+
+    avg_conf = test_df['confidence'].mean()
+    report_lines.append(f"\n   Average prediction confidence: {avg_conf:.2%}")
+    report_lines.append("")
+
+    return report_lines, test_df
+
+
+# ── 2. Aspect-Based Report ────────────────────────────────────────────────────
+
+def aspect_sentiment_report():
+    """Generates aspect-level sentiment statistics."""
+    try:
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+    except FileNotFoundError:
+        return ["   [Aspect summary file not found — run Step 4 first]", ""]
+
+    report_lines = [
+        "── 2. ASPECT-BASED SENTIMENT ──────────────────────────",
+        "   (Ranked by number of mentions)",
+        ""
+    ]
+
+    for aspect, row in summary_df.iterrows():
+        total    = int(row.get('total_mentions', 0))
+        pos_rate = row.get('positive_rate', 0)
+        neg_rate = row.get('negative_rate', 0)
+        neu_rate = 100 - pos_rate - neg_rate
+
+        sentiment_indicator = ("✅ Strong positive" if pos_rate >= 70
+                               else "⚠️  Mixed"        if pos_rate >= 40
+                               else "❌ Mostly negative")
+
+        report_lines.append(f"   {aspect:<30s} ({total:,} mentions)  {sentiment_indicator}")
+        report_lines.append(f"   {'':30s} Positive: {pos_rate:.0f}%  Neutral: {neu_rate:.0f}%  Negative: {neg_rate:.0f}%")
+        report_lines.append("")
+
+    return report_lines
+
+
+# ── 3. Key Findings ───────────────────────────────────────────────────────────
+
+def key_findings_report(test_df):
+    """Highlights the most actionable business findings."""
+    try:
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+        top_positive = summary_df[summary_df.get('positive_rate', 0) >= 70].index.tolist()
+        top_negative = summary_df[summary_df.get('negative_rate', 0) >= 40].index.tolist()
+    except FileNotFoundError:
+        top_positive, top_negative = [], []
+
+    overall_dist = test_df['predicted_sentiment'].value_counts(normalize=True) * 100
+
+    report_lines = [
+        "── 3. KEY BUSINESS FINDINGS ───────────────────────────",
+        ""
+    ]
+
+    # Overall health
+    pos_pct = overall_dist.get('positive', 0)
+    neg_pct = overall_dist.get('negative', 0)
+    if pos_pct >= 60:
+        report_lines.append(f"   ✅ Overall customer satisfaction is STRONG at {pos_pct:.1f}% positive.")
+    elif pos_pct >= 40:
+        report_lines.append(f"   ⚠️  Customer satisfaction is MODERATE at {pos_pct:.1f}% positive.")
+    else:
+        report_lines.append(f"   ❌ Customer satisfaction is LOW — only {pos_pct:.1f}% positive reviews.")
+
+    if top_positive:
+        report_lines.append(f"\n   Strongest aspects (customers are happy with):")
+        for a in top_positive[:3]:
+            report_lines.append(f"     • {a}")
+
+    if top_negative:
+        report_lines.append(f"\n   Weakest aspects (priority areas for improvement):")
+        for a in top_negative[:3]:
+            report_lines.append(f"     • {a}")
+
+    report_lines += [
+        "",
+        "── 4. GENERAL RECOMMENDATIONS ─────────────────────────",
+        ""
+    ]
+    if top_negative:
+        report_lines.append(f"   1. Focus product development resources on improving:")
+        for a in top_negative[:3]:
+            report_lines.append(f"      → {a}")
+    if top_positive:
+        report_lines.append(f"\n   2. Leverage strengths in marketing materials:")
+        for a in top_positive[:3]:
+            report_lines.append(f"      → {a}")
+
+    report_lines += [
+        "",
+        "   3. Monitor sentiment trends monthly to detect emerging issues early.",
+        "   4. Cross-reference negative aspect reviews with low helpful_votes",
+        "      to prioritize which complaints have the broadest customer impact.",
+        "",
+        "═══════════════════════════════════════════════════════",
+        ""
+    ]
+    return report_lines
+
+
+# ── 4. Targeted Strategy & Recommendations ────────────────────────────────────
+
+def extract_positive_evidence(max_quotes_per_aspect=3):
+    """
+    Extracts real customer quotes for each positively-rated aspect from
+    the raw aspect_sentiment_results.csv produced by Step 4.
+    Returns a dict mapping aspect name to a list of positive evidence strings.
+    """
+    try:
+        results_df = pd.read_csv(ASPECT_RESULTS_FILE)
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+    except FileNotFoundError:
+        return {}
+
+    if 'positive_rate' not in summary_df.columns:
+        return {}
+
+    strong_aspects = summary_df[summary_df['positive_rate'] >= 65].index.tolist()
+    evidence_by_aspect = {aspect: [] for aspect in strong_aspects}
+
+    for _, row in results_df.iterrows():
+        try:
+            analysis = json.loads(row['aspects_json'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+
+        for item in analysis.get('aspects', []):
+            aspect    = item.get('aspect', '')
+            sentiment = item.get('sentiment', '')
+            evidence  = item.get('evidence', '').strip()
+
+            if (aspect in evidence_by_aspect
+                    and sentiment == 'positive'
+                    and len(evidence) > 10
+                    and len(evidence_by_aspect[aspect]) < max_quotes_per_aspect):
+                evidence_by_aspect[aspect].append(evidence)
+
+    return {k: v for k, v in evidence_by_aspect.items() if v}
+
+
+def what_customers_love_report():
+    """
+    Generates a section summarising what customers genuinely appreciate
+    about the product, grounded in actual positive quotes from reviews.
+    Each strength is presented with supporting evidence so the section
+    is as credible and specific as the problem strategy section.
+    """
+    try:
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+    except FileNotFoundError:
+        return ["   [Run Step 4 first to generate aspect data]", ""]
+
+    evidence_map = extract_positive_evidence(max_quotes_per_aspect=3)
+
+    if not evidence_map:
+        return [
+            "── 5. WHAT CUSTOMERS LOVE ──────────────────────────────",
+            "   No strongly positive aspects identified at the current",
+            "   threshold. Consider reviewing the positive_rate cutoff.",
+            ""
+        ]
+
+    report_lines = [
+        "── 5. WHAT CUSTOMERS LOVE ───────────────────────────────",
+        "   The following strengths were consistently praised across",
+        "   customer reviews. These represent competitive advantages",
+        "   worth protecting and actively communicating to the market.",
+        ""
+    ]
+
+    # Sort by positive rate descending — most loved aspects first
+    sorted_aspects = sorted(
+        evidence_map.keys(),
+        key=lambda a: summary_df.loc[a, 'positive_rate'] if a in summary_df.index else 0,
+        reverse=True
+    )
+
+    # Business implication templates per aspect — what to do with each strength
+    LEVERAGE_TEMPLATES = {
+        "battery life": (
+            "Highlight battery endurance prominently in product listings, "
+            "ads, and comparison pages. This is a differentiating feature "
+            "that directly influences purchase decisions."
+        ),
+        "performance / speed": (
+            "Use benchmark data alongside customer quotes in marketing. "
+            "Performance is a primary purchase driver — make it central "
+            "to the product's value proposition."
+        ),
+        "display / screen": (
+            "Feature display quality in visual marketing content and "
+            "demo videos. Customers who value screen quality are often "
+            "willing to pay a premium — consider a display-focused SKU."
+        ),
+        "keyboard / trackpad": (
+            "Appeal to productivity-focused buyers by emphasising typing "
+            "experience in content aimed at professionals and students."
+        ),
+        "build quality": (
+            "Leverage build quality in durability-focused messaging. "
+            "Consider backing it with an extended warranty offer to "
+            "reinforce the premium feel customers already appreciate."
+        ),
+        "price / value": (
+            "Lead with value-for-money messaging in price-sensitive segments. "
+            "This is a strong defence against lower-priced competitors."
+        ),
+        "customer service": (
+            "Promote post-purchase support quality in review responses "
+            "and marketing. Strong service sentiment builds brand loyalty "
+            "and reduces churn."
+        ),
+        "software / os": (
+            "Emphasise out-of-box software experience in onboarding materials. "
+            "Satisfied software users are more likely to recommend the product."
+        ),
+        "portability / weight": (
+            "Target commuters, students, and frequent travellers explicitly. "
+            "Portability is a key differentiator in a crowded laptop market."
+        ),
+        "storage": (
+            "Highlight storage capacity and speed in spec comparisons. "
+            "Customers who praise storage are often power users — "
+            "consider a high-storage configuration as an upsell option."
+        )
+    }
+
+    for i, aspect in enumerate(sorted_aspects, 1):
+        quotes    = evidence_map[aspect]
+        pos_rate  = summary_df.loc[aspect, 'positive_rate'] if aspect in summary_df.index else 0
+        mentions  = int(summary_df.loc[aspect, 'total_mentions']) if aspect in summary_df.index else 0
+        leverage  = LEVERAGE_TEMPLATES.get(aspect, "Consider featuring this strength in marketing and sales materials.")
+
+        report_lines.append(f"   {'─'*53}")
+        report_lines.append(f"   Strength #{i}: {aspect.upper()}")
+        report_lines.append(f"   Approval   : {pos_rate:.0f}% positive ({mentions:,} total mentions)")
+        report_lines.append("")
+        report_lines.append("   What customers are saying:")
+        for q in quotes:
+            display_q = (q[:120] + '...') if len(q) > 120 else q
+            report_lines.append(f"     \"{display_q}\"")
+        report_lines.append("")
+        report_lines.append("   How to leverage this strength:")
+        # Word-wrap leverage text at ~55 chars
+        words, line = leverage.split(), ""
+        for word in words:
+            if len(line) + len(word) + 1 > 55:
+                report_lines.append(f"     {line.strip()}")
+                line = word + " "
+            else:
+                line += word + " "
+        if line.strip():
+            report_lines.append(f"     {line.strip()}")
+        report_lines.append("")
+
+    report_lines += [
+        "   ─────────────────────────────────────────────────────",
+        "   These strengths reflect genuine customer appreciation.",
+        "   Protect them during product updates and use them as",
+        "   anchors in competitive positioning and marketing.",
+        ""
+    ]
+    return report_lines
+    """
+    Digs into the raw aspect results to extract real customer quotes
+    for each negatively-rated aspect. Returns a dict mapping aspect name
+    to a list of actual evidence strings pulled directly from reviews.
+    This grounds every recommendation in real customer language rather
+    than generic advice.
+    """
+    try:
+        results_df = pd.read_csv(ASPECT_RESULTS_FILE)
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+    except FileNotFoundError:
+        return {}
+
+    # Identify aspects with meaningful negative sentiment
+    if 'negative_rate' not in summary_df.columns:
+        return {}
+    problem_aspects = summary_df[summary_df['negative_rate'] >= 30].index.tolist()
+
+    evidence_by_aspect = {aspect: [] for aspect in problem_aspects}
+
+    for _, row in results_df.iterrows():
+        try:
+            analysis = json.loads(row['aspects_json'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+
+        for item in analysis.get('aspects', []):
+            aspect    = item.get('aspect', '')
+            sentiment = item.get('sentiment', '')
+            evidence  = item.get('evidence', '').strip()
+
+            if (aspect in evidence_by_aspect
+                    and sentiment == 'negative'
+                    and len(evidence) > 10
+                    and len(evidence_by_aspect[aspect]) < max_quotes_per_aspect):
+                evidence_by_aspect[aspect].append(evidence)
+
+    # Remove aspects where no evidence was collected
+    return {k: v for k, v in evidence_by_aspect.items() if v}
+
+
+def targeted_strategy_report():
+    """
+    Generates a targeted strategy and recommendation section grounded in
+    actual customer quotes. Each recommendation is directly linked to
+    specific evidence from real reviews, making it actionable and credible.
+    """
+    try:
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+    except FileNotFoundError:
+        return ["   [Run Step 4 first to generate aspect data]", ""]
+
+    evidence_map = extract_negative_evidence(max_quotes_per_aspect=3)
+
+    if not evidence_map:
+        return [
+            "── 5. TARGETED STRATEGY & RECOMMENDATIONS ─────────────",
+            "   No significant problem areas identified — overall aspect",
+            "   sentiment is positive across all categories.",
+            ""
+        ]
+
+    report_lines = [
+        "── 6. TARGETED PROBLEM STRATEGY ────────────────────────",
+        "   The following strategies are grounded in actual customer",
+        "   feedback. Each problem area is supported by direct quotes",
+        "   from product reviews.",
+        ""
+    ]
+
+    # Strategy templates mapped to aspect keywords
+    # These provide specific, actionable guidance for each type of problem
+    STRATEGY_TEMPLATES = {
+        "battery life": (
+            "Extend battery capacity or optimize power management firmware. "
+            "Consider offering an extended battery option. "
+            "Set realistic battery life claims in product listings."
+        ),
+        "performance / speed": (
+            "Review hardware specifications at the price point. "
+            "Optimize pre-installed software and remove bloatware. "
+            "Ensure thermal management is adequate to prevent throttling."
+        ),
+        "display / screen": (
+            "Audit display panel quality at the manufacturing level. "
+            "Improve brightness and color accuracy specifications. "
+            "Review quality control for dead pixels and backlight bleed."
+        ),
+        "keyboard / trackpad": (
+            "Source higher-quality keyboard and trackpad components. "
+            "Improve driver software for trackpad responsiveness. "
+            "Gather more specific user feedback on key travel and tactile feel."
+        ),
+        "build quality": (
+            "Strengthen chassis materials and hinge mechanisms. "
+            "Improve quality control processes at the factory level. "
+            "Review long-term durability testing protocols."
+        ),
+        "price / value": (
+            "Re-evaluate the feature-to-price ratio against key competitors. "
+            "Consider bundling accessories or extending warranty at current price. "
+            "Identify which features customers value most and prioritize those."
+        ),
+        "customer service": (
+            "Invest in customer support team training and response time SLAs. "
+            "Improve return and warranty claim processes. "
+            "Proactively follow up with customers who leave negative reviews."
+        ),
+        "software / os": (
+            "Reduce pre-installed bloatware and improve out-of-box experience. "
+            "Ensure timely OS and driver update delivery. "
+            "Improve compatibility testing before product launch."
+        ),
+        "portability / weight": (
+            "Explore lighter materials for future product iterations. "
+            "Clearly communicate weight and dimensions in product listings. "
+            "Consider a dedicated ultraportable SKU for weight-sensitive users."
+        ),
+        "storage": (
+            "Offer higher storage base configurations or more upgrade options. "
+            "Ensure storage speed (read/write) meets expectations at the price tier. "
+            "Be transparent about storage type (HDD vs SSD) in product descriptions."
+        )
+    }
+
+    # Sort problem aspects by negative rate descending (worst first)
+    sorted_aspects = sorted(
+        evidence_map.keys(),
+        key=lambda a: summary_df.loc[a, 'negative_rate'] if a in summary_df.index else 0,
+        reverse=True
+    )
+
+    for i, aspect in enumerate(sorted_aspects, 1):
+        quotes   = evidence_map[aspect]
+        neg_rate = summary_df.loc[aspect, 'negative_rate'] if aspect in summary_df.index else 0
+        mentions = int(summary_df.loc[aspect, 'total_mentions']) if aspect in summary_df.index else 0
+        strategy = STRATEGY_TEMPLATES.get(aspect, "Investigate root cause and gather more specific feedback.")
+
+        report_lines.append(f"   {'─'*53}")
+        report_lines.append(f"   Problem #{i}: {aspect.upper()}")
+        report_lines.append(f"   Severity  : {neg_rate:.0f}% negative ({mentions:,} total mentions)")
+        report_lines.append(f"")
+        report_lines.append(f"   What customers are saying:")
+        for q in quotes:
+            # Truncate very long quotes for readability
+            display_q = (q[:120] + '...') if len(q) > 120 else q
+            report_lines.append(f"     \"{display_q}\"")
+        report_lines.append(f"")
+        report_lines.append(f"   Recommended strategy:")
+        # Word-wrap the strategy text at ~55 chars for clean formatting
+        words, line = strategy.split(), ""
+        for word in words:
+            if len(line) + len(word) + 1 > 55:
+                report_lines.append(f"     {line.strip()}")
+                line = word + " "
+            else:
+                line += word + " "
+        if line.strip():
+            report_lines.append(f"     {line.strip()}")
+        report_lines.append("")
+
+    report_lines += [
+        "   ─────────────────────────────────────────────────────",
+        "   Priority order reflects negative rate severity.",
+        "   Address highest-severity issues in the next product",
+        "   development or customer experience review cycle.",
+        "",
+        "═══════════════════════════════════════════════════════",
+        ""
+    ]
+    return report_lines
+# ── 4. Visualizations ─────────────────────────────────────────────────────────
+
+def generate_visualizations(test_df):
+    """Creates a dashboard of charts summarizing the sentiment analysis."""
+    fig = plt.figure(figsize=(16, 10))
+    fig.suptitle("PC Product Review — Sentiment Analysis Dashboard", fontsize=16, fontweight='bold')
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.4, wspace=0.35)
+
+    colors = {'positive': '#4CAF50', 'neutral': '#FFC107', 'negative': '#F44336'}
+
+    # ── Chart 1: Overall sentiment pie chart ──
+    ax1  = fig.add_subplot(gs[0, 0])
+    dist = test_df['predicted_sentiment'].value_counts()
+    ax1.pie(dist.values,
+            labels=[l.capitalize() for l in dist.index],
+            colors=[colors.get(l, '#999') for l in dist.index],
+            autopct='%1.1f%%', startangle=90)
+    ax1.set_title("Overall Sentiment Distribution")
+
+    # ── Chart 2: Sentiment by star rating ──
+    ax2 = fig.add_subplot(gs[0, 1])
+    rating_sentiment = test_df.groupby(['star_rating', 'predicted_sentiment']).size().unstack(fill_value=0)
+    rating_sentiment.plot(kind='bar', ax=ax2,
+                          color=[colors.get(c, '#999') for c in rating_sentiment.columns])
+    ax2.set_title("Predicted Sentiment by Star Rating")
+    ax2.set_xlabel("Star Rating")
+    ax2.set_ylabel("Count")
+    ax2.tick_params(axis='x', rotation=0)
+    ax2.legend(title="Sentiment")
+
+    # ── Chart 3: Aspect sentiment heatmap ──
+    ax3 = fig.add_subplot(gs[1, :])
+    try:
+        summary_df = pd.read_csv(ASPECT_SUMMARY_FILE, index_col=0)
+        cols_to_plot = [c for c in ['positive', 'neutral', 'negative'] if c in summary_df.columns]
+        if cols_to_plot:
+            heatmap_data = summary_df[cols_to_plot].T
+            sns.heatmap(heatmap_data, ax=ax3, cmap='RdYlGn', annot=True,
+                        fmt='.0f', linewidths=0.5)
+            ax3.set_title("Aspect-Based Sentiment Heatmap (count of mentions)")
+            ax3.set_ylabel("Sentiment")
+    except FileNotFoundError:
+        ax3.text(0.5, 0.5, "Run Step 4 to generate aspect data",
+                 ha='center', va='center', transform=ax3.transAxes)
+        ax3.set_title("Aspect-Based Sentiment (Not yet generated)")
+
+    plt.savefig("sentiment_dashboard.png", dpi=150, bbox_inches='tight')
+    print("Dashboard saved to: sentiment_dashboard.png")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print("Loading test data...")
+    test_df = pd.read_csv(TEST_FILE)
+
+    # Generate report sections
+    overall_lines, test_df = overall_sentiment_report(test_df)
+    aspect_lines           = aspect_sentiment_report()
+    findings_lines         = key_findings_report(test_df)
+    love_lines             = what_customers_love_report()
+    strategy_lines         = targeted_strategy_report()
+
+    # Combine all sections in order
+    full_report = "\n".join(
+        overall_lines +
+        aspect_lines  +
+        findings_lines +
+        love_lines    +
+        strategy_lines
+    )
+    print(full_report)
+
+    with open(REPORT_FILE, 'w') as f:
+        f.write(full_report)
+    print(f"Report saved to: {REPORT_FILE}")
+
+    # Generate visualizations
+    generate_visualizations(test_df)
