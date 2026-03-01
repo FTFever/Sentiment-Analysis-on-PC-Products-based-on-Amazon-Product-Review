@@ -1,158 +1,212 @@
 # Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review
 
-💻 PC Product Sentiment Analyzer
+**End-to-End Local NLP Pipeline for Business-Ready Insights**
 
-End-to-End Local NLP Pipeline for Business-Ready Insights
+> Amazon Electronics Reviews | Python | DistilBERT | Mistral 7B | RAG | Fully Local Inference
 
-Amazon Electronics Reviews | Python | DistilBERT | Mistral 7B | RAG | Fully Local Inference
+---
 
-📌 Project Overview
+## 📌 Project Overview
 
-This project builds a fully local, end-to-end sentiment analysis system for Amazon PC product reviews. It answers two key business questions:      
-- What is the overall customer attitude toward PC products?
-- Which specific product aspects drive positive or negative reactions?
+This project builds a fully local, end-to-end sentiment analysis system for Amazon PC product reviews.
 
-The system processes raw review data and produces:
-1. Fine-tuned sentiment classification model
-2. Aspect-level sentiment analysis
-3. Evidence-grounded business insights
-4. Visual dashboard
-5. RAG-styled executive report matching company's writing style
+It answers two key business questions:
 
-⚡ No paid APIs used. All models run locally.
+1. What is the overall customer attitude toward PC products?
+2. Which specific product aspects drive positive or negative reactions?
 
-🏗️ Architecture Overview
+The system produces:
+- Fine-tuned sentiment classification model
+- Aspect-level sentiment analysis
+- Evidence-grounded business insights
+- Visual dashboard
+- RAG-styled executive report
 
-Raw Amazon Dataset (3.5GB)
-        ↓
-Data Filtering & Cleaning
-        ↓
-Balanced Train / Val / Test Split
-        ↓
-DistilBERT Fine-Tuning (3-Class Sentiment)
-        ↓
-Aspect-Based Sentiment (Mistral 7B via Ollama)
-        ↓
-Aggregation & Visualization
-        ↓
-Business Report Generation
-        ↓
-RAG Style Injection via ChromaDBv
+All models run locally. No paid APIs are used.
 
+---
 
-Raw Amazon Dataset (3.5GB)
-        ↓
-Data Filtering & Cleaning
-        ↓
-Balanced Train / Val / Test Split
-        ↓
-DistilBERT Fine-Tuning (3-Class Sentiment)
-        ↓
-Aspect-Based Sentiment (Mistral 7B via Ollama)
-        ↓
-Aggregation & Visualization
-        ↓
-Business Report Generation
-        ↓
-RAG Style Injection via ChromaDB
+## 🏗️ Architecture Overview
 
-🚀 Pipeline Steps
+Raw Amazon Dataset (3.5GB)  
+↓  
+Data Filtering & Cleaning  
+↓  
+Balanced Train / Validation / Test Split  
+↓  
+DistilBERT Fine-Tuning (3-Class Sentiment)  
+↓  
+Aspect-Based Sentiment (Mistral 7B via Ollama)  
+↓  
+Aggregation & Visualization  
+↓  
+Business Report Generation  
+↓  
+RAG Style Injection via ChromaDB  
 
-1️⃣ Data Loading & Filtering
+---
+
+## 🚀 Pipeline Steps
+
+### 1) Data Loading & Filtering
 - Chunk-based reading of 3.5GB TSV file
 - Filter for PC category
 - Early stop at 10,000 records
-- Handles malformed rows safely
+- Skip malformed rows
+
 Tools: pandas
 
-2️⃣ Data Preprocessing
+---
+
+### 2) Data Preprocessing
 - HTML cleaning
-- Combine headline + body
-- Star rating → sentiment mapping:
-- 1–2 ⭐ → Negative; 3 ⭐ → Neutral; 4–5 ⭐ → Positive
+- Combine headline + body into full_text
+- Star rating mapping:
+  - 1–2 stars → Negative
+  - 3 stars → Neutral
+  - 4–5 stars → Positive
 - Class balancing (over/undersampling)
 - Stratified 70/15/15 split
 
 Tools: pandas, scikit-learn, regex
 
-3️⃣ Overall Sentiment Classification
-- Fine-tuned DistilBERT (66M parameters) for 3-class classification.
+---
 
-Tools:
-HuggingFace Transformers, PyTorch, scikit-learn
+### 3) Overall Sentiment Classification
 
-4️⃣ Aspect-Based Sentiment (Zero-Shot)
-- Local Mistral 7B (via Ollama) extracts sentiment for 10 predefined PC aspects:
-- Battery life; performance; display; keyboard/trackpad; build quality; price/value, customer service; software/OS; portability; storage
-- Returns structured JSON:
-        - Mentioned aspects
-        - Sentiment per aspect
-        - Supporting evidence quote
-        - Deterministic generation (temperature = 0.0)
-        - Incremental saving every 50 rows
+Fine-tuned DistilBERT (distilbert-base-uncased) for 3-class classification.
 
-Tools: Ollama, Mistral 7B, tqdm
+Training details:
+- AdamW optimizer
+- Linear learning rate scheduler with warmup
+- Best checkpoint saved by validation accuracy
+- Confusion matrix evaluation
 
-5️⃣ Business Insights & Dashboard
+Tools: transformers, PyTorch, scikit-learn
+
+---
+
+### 4) Aspect-Based Sentiment (Zero-Shot)
+
+Local Mistral 7B (via Ollama) extracts sentiment for 10 predefined PC aspects:
+
+- Battery life
+- Performance
+- Display
+- Keyboard
+- Build quality
+- Price
+- Customer service
+- Software
+- Portability
+- Storage
+
+Returns structured JSON:
+- Mentioned aspects
+- Sentiment per aspect
+- Supporting evidence quote
+
+Temperature set to 0.0 for deterministic output.  
+Results saved incrementally.
+
+Tools: Ollama, Mistral 7B, pandas, tqdm
+
+---
+
+### 5) Business Insights & Dashboard
+
+Generates:
 - Overall sentiment distribution
 - Aspect-level rankings
 - Key findings
-- Actionable recommendations
-- 📈 Dashboard (pie chart, bar chart, heatmap)
+- Recommendations
+- What Customers Love section
+- Targeted Problem Strategy section
 
-Two core business sections:
+Charts:
+- Pie chart
+- Bar chart
+- Heatmap
 
-✅ What Customers Love
-Extracted positive quotes      
-        - Ranked by approval rate
-        - Paired with a leverage strategy
+Outputs:
+- business_insights_report.txt
+- sentiment_dashboard.png
 
-⚠️ Targeted Problem Strategy
-        - Extracted negative quotes
-        - Ranked by severity
-        - Paired with concrete actions
-All recommendations are traceable to real customer evidence.
+Tools: matplotlib, seaborn, pandas
 
-6️⃣ RAG-Based Report Styling
+---
 
-Process:
-- Ingest company PDF/DOCX/TXT reports
-- Chunk into 500-character overlapping blocks
-- Embed with all-MiniLM-L6-v2
+### 6) RAG-Based Style Matching
+
+RAG is used for writing style retrieval, not content generation.
+
+6a) Ingestion:
+- Extract text from PDF/DOCX/TXT
+- 500-character chunking with overlap
+- Sentence-transformer embeddings
 - Store in ChromaDB
+- Duplicate detection
+
+6b) Report Generation:
 - Retrieve style examples
-- Inject style into final sentiment report
+- Combine with sentiment evidence
+- Generate balanced report
+- Output TXT and Markdown versions
 
-Tools:
-ChromaDB, SentenceTransformers, pypdf, python-docx
+Tools: ChromaDB, SentenceTransformers, Ollama, Mistral 7B
 
+[/
+---
 
-💡 Business Value
+## 📁 Suggested Repository Structure
 
-This system transforms raw customer reviews into:
-- Evidence-backed marketing messaging
-- Ranked product improvement roadmap
-- Severity-prioritized issue detection
-- Executive-ready reporting
+project_root/
+│
+├── data/
+├── sentiment_model/
+├── company_reports/
+├── report_knowledge_base/
+├── outputs/
+├── src/
+└── README.md
 
-It bridges:
+---
+/]
 
-NLP modeling → structured insights → strategic decision support
+## 🛠️ Tech Stack
 
-🧠 What This Project Demonstrates
+- pandas
+- scikit-learn
+- PyTorch
+- HuggingFace Transformers
+- Ollama
+- Mistral 7B
+- ChromaDB
+- SentenceTransformers
+- matplotlib
+- seaborn
+- tqdm
+- regex
 
-- End-to-end ML pipeline design
-- Model fine-tuning
-- Zero-shot LLM prompting
-- RAG system construction
-- Vector databases
-- Production-oriented thinking
-- Business translation of ML outputs
+---
 
-🏁 Future Improvements
+## 🎯 Key Design Decisions
 
-- LoRA fine-tuning for aspect extraction
-- Multi-category product support
-- Streamlit dashboard UI
-- Automated retraining pipeline
-- Deployment via Docker
+- DistilBERT for classification, Mistral for generation
+- Full fine-tuning (no LoRA needed)
+- Prompting instead of fine-tuning for aspect extraction
+- Fully local inference
+- Balanced reporting grounded in real quotes
+
+---
+
+## 💡 Business Value
+
+Transforms raw customer reviews into:
+
+- Evidence-backed marketing insights
+- Ranked improvement roadmap
+- Executive-ready report
+- Privacy-preserving local NLP pipeline
+
+---
