@@ -1,6 +1,9 @@
 # Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review
+
 💻 PC Product Sentiment Analyzer
+
 End-to-End Local NLP Pipeline for Business-Ready Insights
+
 Amazon Electronics Reviews | Python | DistilBERT | Mistral 7B | RAG | Fully Local Inference
 
 📌 Project Overview
@@ -19,6 +22,7 @@ The system processes raw review data and produces:
 ⚡ No paid APIs used. All models run locally.
 
 🏗️ Architecture Overview
+
 Raw Amazon Dataset (3.5GB)
         ↓
 Data Filtering & Cleaning
@@ -36,6 +40,7 @@ Business Report Generation
 RAG Style Injection via ChromaDB
 
 🚀 Pipeline Steps
+
 1️⃣ Data Loading & Filtering
 - Chunk-based reading of 3.5GB TSV file
 - Filter for PC category
@@ -79,6 +84,7 @@ Tools: Ollama, Mistral 7B, tqdm
 - 📈 Dashboard (pie chart, bar chart, heatmap)
 
 Two core business sections:
+
 ✅ What Customers Love
 Extracted positive quotes      
         - Ranked by approval rate
@@ -91,6 +97,7 @@ Extracted positive quotes
 All recommendations are traceable to real customer evidence.
 
 6️⃣ RAG-Based Report Styling
+
 Process:
 - Ingest company PDF/DOCX/TXT reports
 - Chunk into 500-character overlapping blocks
@@ -104,6 +111,7 @@ ChromaDB, SentenceTransformers, pypdf, python-docx
 
 
 💡 Business Value
+
 This system transforms raw customer reviews into:
 - Evidence-backed marketing messaging
 - Ranked product improvement roadmap
@@ -111,4 +119,5 @@ This system transforms raw customer reviews into:
 - Executive-ready reporting
 
 It bridges:
+
 NLP modeling → structured insights → strategic decision support
