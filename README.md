@@ -49,7 +49,7 @@ RAG Style Injection via ChromaDB
 ## 🚀 Pipeline Steps
 
 ### 1) Data Loading & Filtering
-- Chunk-based reading of 3.5GB TSV file
+- Chunk-based reading of 3.5GB Amazon Customer Review TSV file (date source: https://www.kaggle.com/datasets/cynthiarempel/amazon-us-customer-reviews-dataset?select=amazon_reviews_us_PC_v1_00.tsv)
 - Filter for PC category
 - Early stop at 10,000 records
 - Skip malformed rows
