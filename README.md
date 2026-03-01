@@ -37,6 +37,23 @@ Aggregation & Visualization
         ↓
 Business Report Generation
         ↓
+RAG Style Injection via ChromaDBv
+
+
+Raw Amazon Dataset (3.5GB)
+        ↓
+Data Filtering & Cleaning
+        ↓
+Balanced Train / Val / Test Split
+        ↓
+DistilBERT Fine-Tuning (3-Class Sentiment)
+        ↓
+Aspect-Based Sentiment (Mistral 7B via Ollama)
+        ↓
+Aggregation & Visualization
+        ↓
+Business Report Generation
+        ↓
 RAG Style Injection via ChromaDB
 
 🚀 Pipeline Steps
@@ -121,3 +138,21 @@ This system transforms raw customer reviews into:
 It bridges:
 
 NLP modeling → structured insights → strategic decision support
+
+🧠 What This Project Demonstrates
+
+- End-to-end ML pipeline design
+- Model fine-tuning
+- Zero-shot LLM prompting
+- RAG system construction
+- Vector databases
+- Production-oriented thinking
+- Business translation of ML outputs
+
+🏁 Future Improvements
+
+- LoRA fine-tuning for aspect extraction
+- Multi-category product support
+- Streamlit dashboard UI
+- Automated retraining pipeline
+- Deployment via Docker
