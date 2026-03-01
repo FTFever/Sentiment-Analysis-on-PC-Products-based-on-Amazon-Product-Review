@@ -155,7 +155,7 @@ RAG is used for writing style retrieval, not content generation.
 
 Tools: ChromaDB, SentenceTransformers, Ollama, Mistral 7B
 
-[/
+<!--
 ---
 
 ## 📁 Suggested Repository Structure
@@ -171,7 +171,7 @@ project_root/
 └── README.md
 
 ---
-/]
+-->
 
 ## 🛠️ Tech Stack
 
@@ -209,4 +209,3 @@ Transforms raw customer reviews into:
 - Executive-ready report
 - Privacy-preserving local NLP pipeline
 
----
