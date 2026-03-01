@@ -157,11 +157,10 @@ Tools: ChromaDB, SentenceTransformers, Ollama, Mistral 7B
 
 ---
 
-
 ## 📁 Suggested Repository Structure
 
+```
 Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review/
-│
 ├── Code/
 │   ├── load_and_filter.py
 │   ├── preprocessing.py
@@ -171,9 +170,8 @@ Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review/
 │   ├── ingest_template.py
 │   ├── generate_report.py
 │   └── requirements.txt
-│
 └── README.md
-
+```
 ---
 
 ## 🛠️ Tech Stack
