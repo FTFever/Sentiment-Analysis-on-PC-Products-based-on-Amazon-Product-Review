@@ -155,23 +155,24 @@ RAG is used for writing style retrieval, not content generation.
 
 Tools: ChromaDB, SentenceTransformers, Ollama, Mistral 7B
 
-<!--
 ---
+
 
 ## 📁 Suggested Repository Structure
 
-project_root/
-│
-├── data/
-├── sentiment_model/
-├── company_reports/
-├── report_knowledge_base/
-├── outputs/
-├── src/
+Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review/
+├── Code/
+│   ├── load_and_filter.py
+│   ├── preprocessing.py
+│   ├── overall_sentiment.py
+│   ├── aspect_sentiment.py
+│   ├── report.py
+│   ├── ingest_template.py
+|   ├── generate_report.py
+│   └── requirements.txt
+|
 └── README.md
-
 ---
--->
 
 ## 🛠️ Tech Stack
 
