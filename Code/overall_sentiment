@@ -1,0 +1,261 @@
+"""
+STEP 3: Overall Sentiment Classification
+------------------------------------------
+Purpose : Fine-tune a DistilBERT model to classify reviews as
+          positive / neutral / negative.
+
+Why DistilBERT and not LLaMA/Mistral for this task?
+  - Classification tasks (positive/neutral/negative) are well-suited to
+    encoder-based models like DistilBERT — they are smaller, faster, and
+    more accurate for this specific task than large generative models.
+  - LLaMA/Mistral will be used in Step 4 for aspect-based sentiment,
+    where its language understanding and reasoning ability truly shines.
+  - DistilBERT runs fully locally with no API costs.
+
+Input   : train.csv, val.csv, test.csv  (from Step 2)
+Output  : Saved model in ./sentiment_model/
+"""
+
+import pandas as pd
+import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader
+from transformers import (DistilBertTokenizerFast,
+                          DistilBertForSequenceClassification,
+                          get_linear_schedule_with_warmup)
+from torch.optim import AdamW
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
+# ── Configuration ────────────────────────────────────────────────────────────
+MODEL_NAME   = "distilbert-base-uncased"
+OUTPUT_DIR   = "./sentiment_model"
+MAX_LENGTH   = 256      # Max tokens per review (longer = more memory)
+BATCH_SIZE   = 16
+EPOCHS       = 3
+LEARNING_RATE = 2e-5
+RANDOM_SEED  = 42
+
+LABEL2ID = {"negative": 0, "neutral": 1, "positive": 2}
+ID2LABEL = {0: "negative", 1: "neutral",  2: "positive"}
+# ─────────────────────────────────────────────────────────────────────────────
+
+torch.manual_seed(RANDOM_SEED)
+device = torch.device("mps" if torch.backends.mps.is_available()   # Apple Silicon
+                       else "cuda" if torch.cuda.is_available()      # NVIDIA GPU
+                       else "cpu")
+print(f"Using device: {device}")
+
+
+# ── Dataset Class ─────────────────────────────────────────────────────────────
+
+class ReviewDataset(Dataset):
+    def __init__(self, texts, labels, tokenizer, max_length):
+        self.encodings = tokenizer(
+            texts, truncation=True, padding=True,
+            max_length=max_length, return_tensors='pt'
+        )
+        self.labels = torch.tensor(labels, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return {key: val[idx] for key, val in self.encodings.items()}, self.labels[idx]
+
+
+# ── Training ──────────────────────────────────────────────────────────────────
+
+def train_model(train_df, val_df):
+    tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_NAME)
+    model     = DistilBertForSequenceClassification.from_pretrained(
+        MODEL_NAME,
+        num_labels=3,
+        id2label=ID2LABEL,
+        label2id=LABEL2ID
+    ).to(device)
+
+    # Prepare datasets
+    train_dataset = ReviewDataset(
+        train_df['full_text'].tolist(),
+        train_df['sentiment'].map(LABEL2ID).tolist(),
+        tokenizer, MAX_LENGTH
+    )
+    val_dataset = ReviewDataset(
+        val_df['full_text'].tolist(),
+        val_df['sentiment'].map(LABEL2ID).tolist(),
+        tokenizer, MAX_LENGTH
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader   = DataLoader(val_dataset,   batch_size=BATCH_SIZE)
+
+    optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+    total_steps = len(train_loader) * EPOCHS
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=int(0.1 * total_steps),
+        num_training_steps=total_steps
+    )
+
+    best_val_accuracy = 0
+    history = {"train_loss": [], "val_loss": [], "val_accuracy": []}
+
+    print(f"\nFine-tuning {MODEL_NAME} for {EPOCHS} epochs...")
+    print(f"Training samples: {len(train_dataset):,} | Validation: {len(val_dataset):,}\n")
+
+    for epoch in range(EPOCHS):
+        # ── Training phase ──
+        model.train()
+        total_train_loss = 0
+        for batch_inputs, batch_labels in train_loader:
+            batch_inputs = {k: v.to(device) for k, v in batch_inputs.items()}
+            batch_labels = batch_labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(**batch_inputs, labels=batch_labels)
+            loss = outputs.loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+            total_train_loss += loss.item()
+
+        avg_train_loss = total_train_loss / len(train_loader)
+
+        # ── Validation phase ──
+        model.eval()
+        total_val_loss, correct, total = 0, 0, 0
+        with torch.no_grad():
+            for batch_inputs, batch_labels in val_loader:
+                batch_inputs = {k: v.to(device) for k, v in batch_inputs.items()}
+                batch_labels = batch_labels.to(device)
+                outputs = model(**batch_inputs, labels=batch_labels)
+                total_val_loss += outputs.loss.item()
+                preds = outputs.logits.argmax(dim=-1)
+                correct += (preds == batch_labels).sum().item()
+                total   += batch_labels.size(0)
+
+        avg_val_loss  = total_val_loss / len(val_loader)
+        val_accuracy  = correct / total
+
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        history["val_accuracy"].append(val_accuracy)
+
+        print(f"Epoch {epoch+1}/{EPOCHS} | "
+              f"Train Loss: {avg_train_loss:.4f} | "
+              f"Val Loss: {avg_val_loss:.4f} | "
+              f"Val Accuracy: {val_accuracy:.4f}")
+
+        # Save best model
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            model.save_pretrained(OUTPUT_DIR)
+            tokenizer.save_pretrained(OUTPUT_DIR)
+            print(f"  ✓ Best model saved (accuracy: {best_val_accuracy:.4f})")
+
+    return model, tokenizer, history
+
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+
+def evaluate_model(test_df, model_dir=OUTPUT_DIR):
+    print("\nEvaluating on test set...")
+    tokenizer = DistilBertTokenizerFast.from_pretrained(model_dir)
+    model     = DistilBertForSequenceClassification.from_pretrained(model_dir).to(device)
+    model.eval()
+
+    test_dataset = ReviewDataset(
+        test_df['full_text'].tolist(),
+        test_df['sentiment'].map(LABEL2ID).tolist(),
+        tokenizer, MAX_LENGTH
+    )
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
+
+    all_preds, all_labels = [], []
+    with torch.no_grad():
+        for batch_inputs, batch_labels in test_loader:
+            batch_inputs = {k: v.to(device) for k, v in batch_inputs.items()}
+            outputs = model(**batch_inputs)
+            preds   = outputs.logits.argmax(dim=-1).cpu().numpy()
+            all_preds.extend(preds)
+            all_labels.extend(batch_labels.numpy())
+
+    # Classification report
+    print("\nClassification Report:")
+    print(classification_report(
+        all_labels, all_preds,
+        target_names=["negative", "neutral", "positive"]
+    ))
+
+    # Confusion matrix
+    cm = confusion_matrix(all_labels, all_preds)
+    plt.figure(figsize=(7, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=["negative", "neutral", "positive"],
+                yticklabels=["negative", "neutral", "positive"])
+    plt.title("Confusion Matrix — Overall Sentiment")
+    plt.ylabel("Actual")
+    plt.xlabel("Predicted")
+    plt.tight_layout()
+    plt.savefig("confusion_matrix.png")
+    print("Confusion matrix saved to confusion_matrix.png")
+
+
+# ── Inference ─────────────────────────────────────────────────────────────────
+
+def predict_sentiment(texts, model_dir=OUTPUT_DIR):
+    """
+    Predict sentiment for a list of review texts.
+    Returns a list of dicts with label and confidence score.
+    """
+    tokenizer = DistilBertTokenizerFast.from_pretrained(model_dir)
+    model     = DistilBertForSequenceClassification.from_pretrained(model_dir).to(device)
+    model.eval()
+
+    inputs  = tokenizer(texts, truncation=True, padding=True,
+                        max_length=MAX_LENGTH, return_tensors='pt').to(device)
+    with torch.no_grad():
+        logits = model(**inputs).logits
+        probs  = torch.softmax(logits, dim=-1).cpu().numpy()
+
+    results = []
+    for i, text in enumerate(texts):
+        pred_id    = np.argmax(probs[i])
+        results.append({
+            "text":       text[:100] + "..." if len(text) > 100 else text,
+            "sentiment":  ID2LABEL[pred_id],
+            "confidence": round(float(probs[i][pred_id]), 4),
+            "scores":     {ID2LABEL[j]: round(float(probs[i][j]), 4) for j in range(3)}
+        })
+    return results
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print("Loading preprocessed data...")
+    train_df = pd.read_csv("train.csv")
+    val_df   = pd.read_csv("val.csv")
+    test_df  = pd.read_csv("test.csv")
+
+    # Fine-tune
+    model, tokenizer, history = train_model(train_df, val_df)
+
+    # Evaluate
+    evaluate_model(test_df)
+
+    # Quick inference demo
+    sample_reviews = [
+        "This laptop is amazing! Battery lasts all day and it's super fast.",
+        "Decent laptop but the keyboard feels cheap and trackpad is unresponsive.",
+        "Completely stopped working after 2 weeks. Total waste of money."
+    ]
+    print("\nSample Predictions:")
+    for result in predict_sentiment(sample_reviews):
+        print(f"  [{result['sentiment'].upper()}] ({result['confidence']:.2%}) "
+              f"→ {result['text']}")
