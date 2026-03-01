@@ -54,72 +54,26 @@ Tools: pandas
 Tools: pandas, scikit-learn, regex
 
 3️⃣ Overall Sentiment Classification
-
-Fine-tuned DistilBERT (66M parameters) for 3-class classification.
-
-Why DistilBERT?
-
-Smaller and faster than generative LLMs
-
-Ideal for classification
-
-Trainable locally (CPU or Apple Silicon MPS)
-
-Training details:
-
-AdamW optimizer
-
-Linear LR scheduler with warmup
-
-Best checkpoint saved by validation accuracy
-
-Confusion matrix evaluation
+- Fine-tuned DistilBERT (66M parameters) for 3-class classification.
 
 Tools:
 HuggingFace Transformers, PyTorch, scikit-learn
 
 4️⃣ Aspect-Based Sentiment (Zero-Shot)
-
-Local Mistral 7B (via Ollama) extracts sentiment for 10 predefined PC aspects:
-
-Battery life
-
-Performance
-
-Display
-
-Keyboard/Trackpad
-
-Build quality
-
-Price/Value
-
-Customer service
-
-Software/OS
-
-Portability
-
-Storage
-
-Returns structured JSON:
-
-Mentioned aspects
-
-Sentiment per aspect
-
-Supporting evidence quote
-
-Deterministic generation (temperature = 0.0)
-Incremental saving every 50 rows
+- Local Mistral 7B (via Ollama) extracts sentiment for 10 predefined PC aspects:
+- Battery life; performance; display; keyboard/trackpad; build quality; price/value, customer service; software/OS; portability; storage
+- Returns structured JSON:
+        - Mentioned aspects
+        - Sentiment per aspect
+        - Supporting evidence quote
+        - Deterministic generation (temperature = 0.0)
+        - Incremental saving every 50 rows
 
 Tools: Ollama, Mistral 7B, tqdm
 
 5️⃣ Business Insights & Dashboard
-
 Generates:
-
-Overall sentiment distribution
+- Overall sentiment distribution
 
 Aspect-level rankings
 
@@ -132,48 +86,24 @@ Actionable recommendations
 Two core business sections:
 
 ✅ What Customers Love
-
-Extracted positive quotes
-
-Ranked by approval rate
-
-Paired with leverage strategy
+Extracted positive quotes      
+        - Ranked by approval rate
+        - Paired with a leverage strategy
 
 ⚠️ Targeted Problem Strategy
-
-Extracted negative quotes
-
-Ranked by severity
-
-Paired with concrete actions
-
+        - Extracted negative quotes
+        - Ranked by severity
+        - Paired with concrete actions
 All recommendations are traceable to real customer evidence.
 
 6️⃣ RAG-Based Report Styling
-
-Instead of using RAG for content generation, it is used for:
-
-🎯 Writing style retrieval only
-
 Process:
-
-Ingest company PDF/DOCX/TXT reports
-
-Chunk into 500-character overlapping blocks
-
-Embed with all-MiniLM-L6-v2
-
-Store in ChromaDB
-
-Retrieve style examples
-
-Inject style into final sentiment report
-
-This ensures:
-
-Content = driven by data
-
-Tone & structure = aligned with company voice
+- Ingest company PDF/DOCX/TXT reports
+- Chunk into 500-character overlapping blocks
+- Embed with all-MiniLM-L6-v2
+- Store in ChromaDB
+- Retrieve style examples
+- Inject style into final sentiment report
 
 Tools:
 ChromaDB, SentenceTransformers, pypdf, python-docx
@@ -191,63 +121,13 @@ SentenceTransformers	Embeddings
 matplotlib / seaborn	Visualizations
 tqdm	Batch processing
 regex	Cleaning & JSON extraction
-🎯 Key Design Decisions
-🔹 DistilBERT for Classification, Mistral for Generation
-
-Encoder model for accuracy + generative model for reasoning.
-
-🔹 Full Fine-Tuning (No LoRA)
-
-DistilBERT is small enough for full fine-tuning locally.
-
-🔹 Prompting Over Fine-Tuning for Aspects
-
-No large labeled dataset required.
-
-🔹 Fully Local Inference
-
-No API cost
-
-No data privacy risk
-
-No dependency on external services
-
-🔹 Balanced Reporting
-
-Equal rigor on strengths and weaknesses prevents:
-
-Removing key strengths during product updates
-
-One-sided product decisions
-
-📊 Example Outputs
-
-sentiment_model/ → Fine-tuned model
-
-confusion_matrix.png
-
-aspect_sentiment_results.csv
-
-aspect_summary.csv
-
-business_insights_report.txt
-
-sentiment_dashboard.png
-
-final_business_report.md
 
 💡 Business Value
-
 This system transforms raw customer reviews into:
-
-Evidence-backed marketing messaging
-
-Ranked product improvement roadmap
-
-Severity-prioritized issue detection
-
-Executive-ready reporting
+- Evidence-backed marketing messaging
+- Ranked product improvement roadmap
+- Severity-prioritized issue detection
+- Executive-ready reporting
 
 It bridges:
-
 NLP modeling → structured insights → strategic decision support
