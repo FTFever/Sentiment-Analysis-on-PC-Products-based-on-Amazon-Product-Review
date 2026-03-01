@@ -1,0 +1,84 @@
+"""
+STEP 1: Data Loading & Filtering
+---------------------------------
+Purpose: Load the large dataset efficiently and filter for PC category only.
+Output:  Saves a filtered CSV file (pc_reviews.csv) for use in subsequent steps.
+"""
+
+import pandas as pd
+import os
+
+# ── Configuration ────────────────────────────────────────────────────────────
+INPUT_FILE  = "your_dataset.tsv"   # <-- Replace with your actual filename
+OUTPUT_FILE = "pc_reviews.csv"
+TARGET_CATEGORY = "PC"
+CHUNK_SIZE  = 10000                # Rows processed at a time to manage memory
+MAX_RECORDS = 10000                # Stop after collecting this many PC records
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def load_and_filter(input_file, output_file, target_category):
+    """
+    Reads the dataset in chunks, filters for the target product category,
+    collects the first MAX_RECORDS matching rows, and saves to a CSV file.
+    """
+    if not os.path.exists(input_file):
+        raise FileNotFoundError(f"Dataset not found: {input_file}")
+
+    print(f"Loading and filtering dataset for category: '{target_category}'...")
+    print(f"Target: first {MAX_RECORDS:,} PC records\n")
+    filtered_chunks = []
+    collected = 0
+
+    for i, chunk in enumerate(pd.read_csv(
+        input_file,
+        sep='\t',
+        chunksize=CHUNK_SIZE,
+        on_bad_lines='skip'   # Skip malformed rows (e.g. tabs inside review text)
+    )):
+        # Filter for target category only
+        pc_chunk = chunk[chunk['product_category'] == target_category]
+
+        if len(pc_chunk) > 0:
+            # Only take as many rows as needed to reach MAX_RECORDS
+            remaining = MAX_RECORDS - collected
+            pc_chunk  = pc_chunk.head(remaining)
+            filtered_chunks.append(pc_chunk)
+            collected += len(pc_chunk)
+            print(f"  Collected {collected:,} / {MAX_RECORDS:,} PC records...")
+
+        # Stop once we have enough
+        if collected >= MAX_RECORDS:
+            print(f"\n  Target reached — stopping early.")
+            break
+
+    if not filtered_chunks:
+        raise ValueError(f"No rows found for category '{target_category}'. "
+                         "Please check the category name in your dataset.")
+
+    df = pd.concat(filtered_chunks, ignore_index=True)
+    df.to_csv(output_file, index=False)
+
+    print(f"\nFiltering complete!")
+    print(f"Total PC reviews saved : {len(df):,}")
+    print(f"Output file            : {output_file}")
+    return df
+
+
+def summarize(df):
+    """Print a quick summary of the filtered dataset."""
+    print("\n── Dataset Summary ──────────────────────────────")
+    print(f"Shape              : {df.shape}")
+    print(f"\nStar rating distribution:")
+    print(df['star_rating'].value_counts().sort_index())
+    print(f"\nMissing values:")
+    print(df.isnull().sum()[df.isnull().sum() > 0] or "  None")
+    print(f"\nDate range         : {df['review_date'].min()} → {df['review_date'].max()}")
+    print(f"\nTop 10 products:")
+    print(df['product_title'].value_counts().head(10))
+    print("─────────────────────────────────────────────────")
+
+
+if __name__ == "__main__":
+    df = load_and_filter(INPUT_FILE, OUTPUT_FILE, TARGET_CATEGORY)
+    summarize(df)
