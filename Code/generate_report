@@ -1,0 +1,475 @@
+"""
+STEP 6b: RAG-Based Report Generator
+--------------------------------------
+Purpose : Generates a professionally styled business report by combining:
+          1. Sentiment analysis results (from Steps 3 & 4)
+          2. Retrieved style examples from your company knowledge base (Step 6a)
+          3. Mistral (via Ollama) for natural language generation
+
+Workflow:
+  Sentiment data → Query knowledge base → Retrieve style examples
+                                                    ↓
+                              Mistral generates report matching your company style
+
+Prerequisites:
+  - Step 6a must be run first to build the knowledge base
+  - Ollama must be running: ollama serve
+  - pip install chromadb sentence-transformers ollama pandas
+
+Input   : aspect_summary.csv, test.csv (from Steps 3 & 4)
+Output  : final_business_report.txt, final_business_report.md
+"""
+
+import pandas as pd
+import json
+import os
+import re
+from datetime import datetime
+import chromadb
+from chromadb.utils import embedding_functions
+import ollama
+
+# ── Configuration ────────────────────────────────────────────────────────────
+DB_PATH          = "./report_knowledge_base"
+COLLECTION_NAME  = "company_reports"
+EMBEDDING_MODEL  = "all-MiniLM-L6-v2"
+LLM_MODEL        = "mistral"
+
+ASPECT_SUMMARY   = "aspect_summary.csv"
+TEST_DATA        = "test.csv"
+OUTPUT_TXT       = "final_business_report.txt"
+OUTPUT_MD        = "final_business_report.md"
+
+# RAG retrieval settings
+N_STYLE_EXAMPLES = 3      # Number of style examples to retrieve from knowledge base
+N_RESULTS        = 5      # Number of chunks to retrieve per query
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── 1. Load Sentiment Results ─────────────────────────────────────────────────
+
+def load_sentiment_results():
+    """
+    Loads and summarizes the sentiment analysis results from Steps 3 and 4.
+    Returns a structured dict containing all key metrics AND actual customer
+    evidence quotes for each problem aspect, so the RAG report can ground
+    its strategy section in real customer language.
+    """
+    print("Loading sentiment analysis results...")
+
+    # Overall sentiment distribution
+    test_df = pd.read_csv(TEST_DATA)
+    if 'predicted_sentiment' not in test_df.columns:
+        test_df['predicted_sentiment'] = test_df['sentiment']
+
+    overall_dist = (test_df['predicted_sentiment']
+                    .value_counts(normalize=True) * 100
+                    .round(1))
+
+    # Aspect-based sentiment summary
+    try:
+        aspect_df = pd.read_csv(ASPECT_SUMMARY, index_col=0)
+        aspects_available = True
+    except FileNotFoundError:
+        aspect_df = pd.DataFrame()
+        aspects_available = False
+        print("  Warning: aspect_summary.csv not found — aspect section will be skipped")
+
+    # Build structured summary
+    results = {
+        "total_reviews":         len(test_df),
+        "positive_pct":          float(overall_dist.get('positive', 0)),
+        "neutral_pct":           float(overall_dist.get('neutral', 0)),
+        "negative_pct":          float(overall_dist.get('negative', 0)),
+        "dominant_sentiment":    overall_dist.idxmax(),
+        "aspects":               [],
+        "top_positive_aspects":  [],
+        "top_negative_aspects":  [],
+        "problem_evidence":      {},   # actual customer quotes for problem aspects
+        "strength_evidence":     {}    # actual customer quotes for strength aspects
+    }
+
+    if aspects_available and not aspect_df.empty:
+        for aspect, row in aspect_df.iterrows():
+            aspect_data = {
+                "name":           aspect,
+                "total_mentions": int(row.get('total_mentions', 0)),
+                "positive_rate":  float(row.get('positive_rate', 0)),
+                "negative_rate":  float(row.get('negative_rate', 0))
+            }
+            results["aspects"].append(aspect_data)
+
+            if aspect_data["positive_rate"] >= 65:
+                results["top_positive_aspects"].append(aspect)
+            if aspect_data["negative_rate"] >= 30:
+                results["top_negative_aspects"].append(aspect)
+
+        results["aspects"].sort(key=lambda x: x["total_mentions"], reverse=True)
+
+        # Extract real customer quotes for each problem aspect
+        results["problem_evidence"] = _extract_problem_evidence(
+            results["top_negative_aspects"], max_quotes=2
+        )
+
+        # Extract real customer quotes for each strength aspect
+        results["strength_evidence"] = _extract_strength_evidence(
+            results["top_positive_aspects"], max_quotes=2
+        )
+
+    print(f"  Total reviews      : {results['total_reviews']:,}")
+    print(f"  Positive           : {results['positive_pct']:.1f}%")
+    print(f"  Neutral            : {results['neutral_pct']:.1f}%")
+    print(f"  Negative           : {results['negative_pct']:.1f}%")
+    print(f"  Aspects analyzed   : {len(results['aspects'])}")
+    print(f"  Problem areas      : {len(results['top_negative_aspects'])}")
+
+    return results
+
+
+def _extract_problem_evidence(problem_aspects, max_quotes=2):
+    """
+    Extracts real customer quotes for each problem aspect from the
+    aspect_sentiment_results.csv produced by Step 4.
+    Returns a dict: { aspect_name: [quote1, quote2, ...] }
+    """
+    evidence = {aspect: [] for aspect in problem_aspects}
+
+    try:
+        results_df = pd.read_csv("aspect_sentiment_results.csv")
+    except FileNotFoundError:
+        return evidence
+
+    for _, row in results_df.iterrows():
+        try:
+            analysis = json.loads(row['aspects_json'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+
+        for item in analysis.get('aspects', []):
+            aspect    = item.get('aspect', '')
+            sentiment = item.get('sentiment', '')
+            quote     = item.get('evidence', '').strip()
+
+            if (aspect in evidence
+                    and sentiment == 'negative'
+                    and len(quote) > 10
+                    and len(evidence[aspect]) < max_quotes):
+                evidence[aspect].append(quote[:120])   # Truncate very long quotes
+
+    return {k: v for k, v in evidence.items() if v}
+
+
+def _extract_strength_evidence(strength_aspects, max_quotes=2):
+    """
+    Extracts real positive customer quotes for each strongly-rated aspect.
+    Returns a dict: { aspect_name: [quote1, quote2, ...] }
+    """
+    evidence = {aspect: [] for aspect in strength_aspects}
+
+    try:
+        results_df = pd.read_csv("aspect_sentiment_results.csv")
+    except FileNotFoundError:
+        return evidence
+
+    for _, row in results_df.iterrows():
+        try:
+            analysis = json.loads(row['aspects_json'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+
+        for item in analysis.get('aspects', []):
+            aspect    = item.get('aspect', '')
+            sentiment = item.get('sentiment', '')
+            quote     = item.get('evidence', '').strip()
+
+            if (aspect in evidence
+                    and sentiment == 'positive'
+                    and len(quote) > 10
+                    and len(evidence[aspect]) < max_quotes):
+                evidence[aspect].append(quote[:120])
+
+    return {k: v for k, v in evidence.items() if v}
+
+
+# ── 2. RAG Retrieval ──────────────────────────────────────────────────────────
+
+def retrieve_style_examples(sentiment_results, collection):
+    """
+    Retrieves the most relevant style examples from the knowledge base.
+    Uses multiple targeted queries to capture different aspects of report style:
+    - Overall structure and tone
+    - How findings are presented
+    - How recommendations are framed
+    """
+    dominant  = sentiment_results['dominant_sentiment']
+    pos_pct   = sentiment_results['positive_pct']
+    neg_pct   = sentiment_results['negative_pct']
+
+    # Build contextually relevant queries based on the actual data
+    queries = [
+        f"customer satisfaction analysis {dominant} sentiment findings",
+        "product performance recommendations business report",
+        "aspect analysis conclusions executive summary"
+    ]
+
+    # Add tone-specific query based on data
+    if neg_pct >= 40:
+        queries.append("areas for improvement critical issues customer complaints")
+    elif pos_pct >= 60:
+        queries.append("positive customer feedback strengths competitive advantage")
+    else:
+        queries.append("mixed customer sentiment balanced assessment recommendations")
+
+    print("\nRetrieving style examples from knowledge base...")
+    retrieved_chunks = []
+    seen_sources     = set()
+
+    for query in queries:
+        results = collection.query(
+            query_texts=[query],
+            n_results=N_RESULTS,
+            include=['documents', 'metadatas', 'distances']
+        )
+
+        for doc, meta, dist in zip(results['documents'][0],
+                                   results['metadatas'][0],
+                                   results['distances'][0]):
+            source = meta.get('source', 'unknown')
+
+            # Deduplicate by source to get variety across different reports
+            if source not in seen_sources and len(retrieved_chunks) < N_STYLE_EXAMPLES * 2:
+                retrieved_chunks.append({
+                    "text":       doc,
+                    "source":     source,
+                    "relevance":  round(1 - dist, 3)   # Convert distance to similarity
+                })
+                seen_sources.add(source)
+
+    # Take top N most relevant chunks
+    retrieved_chunks = sorted(retrieved_chunks,
+                              key=lambda x: x['relevance'],
+                              reverse=True)[:N_STYLE_EXAMPLES]
+
+    print(f"  Retrieved {len(retrieved_chunks)} style examples from:")
+    for chunk in retrieved_chunks:
+        print(f"    - {chunk['source']} (relevance: {chunk['relevance']:.3f})")
+
+    return retrieved_chunks
+
+
+# ── 3. Prompt Construction ────────────────────────────────────────────────────
+
+def build_generation_prompt(sentiment_results, style_examples):
+    """
+    Constructs the full prompt for Mistral combining:
+    - Retrieved style examples (the RAG component)
+    - Actual sentiment data (the content component)
+    - Explicit instructions for structure and format
+    """
+    # Format style examples section
+    style_section = "\n\n".join([
+        f"--- Style Example {i+1} (from: {ex['source']}) ---\n{ex['text']}"
+        for i, ex in enumerate(style_examples)
+    ])
+
+    # Format overall sentiment section
+    overall_section = f"""
+- Total reviews analyzed: {sentiment_results['total_reviews']:,}
+- Positive sentiment: {sentiment_results['positive_pct']:.1f}%
+- Neutral sentiment:  {sentiment_results['neutral_pct']:.1f}%
+- Negative sentiment: {sentiment_results['negative_pct']:.1f}%
+- Dominant sentiment: {sentiment_results['dominant_sentiment'].upper()}
+"""
+
+    # Format aspect section
+    if sentiment_results['aspects']:
+        aspect_lines = "\n".join([
+            f"- {a['name']}: {a['total_mentions']} mentions | "
+            f"Positive: {a['positive_rate']:.0f}% | Negative: {a['negative_rate']:.0f}%"
+            for a in sentiment_results['aspects'][:8]
+        ])
+        aspect_section = f"Aspect-Based Sentiment:\n{aspect_lines}"
+
+        strengths  = ", ".join(sentiment_results['top_positive_aspects'][:3]) or "None identified"
+        weaknesses = ", ".join(sentiment_results['top_negative_aspects'][:3]) or "None identified"
+        aspect_section += f"\n\nTop Strengths : {strengths}"
+        aspect_section += f"\nTop Weaknesses: {weaknesses}"
+    else:
+        aspect_section = "Aspect-based data not available."
+
+    # Format customer evidence section for problem strategy
+    evidence = sentiment_results.get('problem_evidence', {})
+    if evidence:
+        evidence_lines = []
+        for aspect, quotes in evidence.items():
+            evidence_lines.append(f"\n  {aspect.upper()}:")
+            for q in quotes:
+                evidence_lines.append(f"    - \"{q}\"")
+        problem_evidence_section = "Customer quotes for problem areas:" + "\n".join(evidence_lines)
+    else:
+        problem_evidence_section = "No specific negative quotes available."
+
+    # Format customer evidence section for strengths
+    strengths_ev = sentiment_results.get('strength_evidence', {})
+    if strengths_ev:
+        strength_lines = []
+        for aspect, quotes in strengths_ev.items():
+            strength_lines.append(f"\n  {aspect.upper()}:")
+            for q in quotes:
+                strength_lines.append(f"    - \"{q}\"")
+        strength_evidence_section = "Customer quotes for strength areas:" + "\n".join(strength_lines)
+    else:
+        strength_evidence_section = "No specific positive quotes available."
+
+    # Full prompt
+    prompt = f"""You are a professional business analyst writing a formal customer sentiment analysis report.
+
+WRITING STYLE GUIDE:
+Study the following examples carefully. These are excerpts from actual reports written by this company.
+Match their tone, vocabulary, sentence structure, and level of formality exactly.
+
+{style_section}
+
+---
+
+SENTIMENT DATA TO REPORT ON:
+{overall_section}
+{aspect_section}
+
+---
+
+POSITIVE CUSTOMER EVIDENCE (actual quotes praising the product):
+{strength_evidence_section}
+
+NEGATIVE CUSTOMER EVIDENCE (actual quotes criticising the product):
+{problem_evidence_section}
+
+---
+
+REPORT REQUIREMENTS:
+Write a complete, professional business report based on the sentiment data above.
+The report must:
+1. Match the writing style demonstrated in the style examples above
+2. Include the following sections in order:
+   - Executive Summary (2-3 sentences capturing the overall picture — both strengths and issues)
+   - Overall Sentiment Analysis (explain the distribution and what it means)
+   - Aspect-Based Analysis (discuss each major aspect finding)
+   - What Customers Love: For each positively-rated aspect, summarise what customers
+     appreciate and WHY it matters strategically, directly referencing the positive
+     customer quotes provided above. Include a suggestion for how to leverage each
+     strength in marketing or product strategy.
+   - Targeted Problem Strategy: For each problem area, write a specific actionable
+     recommendation directly referencing the negative customer quotes above. Each
+     recommendation must explain WHAT the problem is (using the quote as evidence),
+     WHY it matters, and HOW the business should address it concretely.
+   - Conclusion (brief closing statement balancing both the strengths and areas for growth)
+3. Use professional business language throughout
+4. Reference specific percentages and numbers from the data
+5. Both the strengths and problem sections must be grounded in real customer language —
+   do not write generic advice. Every point must trace back to actual customer feedback.
+6. Today's date is: {datetime.now().strftime("%B %d, %Y")}
+
+Write the full report now:"""
+
+    return prompt
+
+
+# ── 4. Report Generation ──────────────────────────────────────────────────────
+
+def generate_report(prompt):
+    """Sends the prompt to local Mistral via Ollama and returns the generated report."""
+    print("\nGenerating report with Mistral...")
+    print("  (This may take 1-3 minutes on CPU)\n")
+
+    try:
+        response = ollama.chat(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            options={
+                "temperature": 0.3,    # Slightly creative but mostly consistent
+                "num_predict": 2000    # Max tokens for report length
+            }
+        )
+        return response['message']['content'].strip()
+
+    except Exception as e:
+        raise RuntimeError(f"Mistral generation failed: {e}\n"
+                           "Make sure Ollama is running: ollama serve")
+
+
+# ── 5. Post-Processing & Saving ───────────────────────────────────────────────
+
+def save_report(report_text, sentiment_results):
+    """
+    Adds a metadata header to the report and saves in both
+    plain text and Markdown formats.
+    """
+    header = f"""PC PRODUCT SENTIMENT ANALYSIS REPORT
+Generated: {datetime.now().strftime("%B %d, %Y at %H:%M")}
+Reviews Analyzed: {sentiment_results['total_reviews']:,}
+Overall Sentiment: {sentiment_results['positive_pct']:.1f}% Positive | {sentiment_results['neutral_pct']:.1f}% Neutral | {sentiment_results['negative_pct']:.1f}% Negative
+{"="*65}
+
+"""
+    full_report = header + report_text
+
+    # Save as plain text
+    with open(OUTPUT_TXT, 'w', encoding='utf-8') as f:
+        f.write(full_report)
+
+    # Save as Markdown (adds formatting for better readability)
+    md_report = full_report.replace("="*65, "---")
+    with open(OUTPUT_MD, 'w', encoding='utf-8') as f:
+        f.write(md_report)
+
+    print(f"\nReport saved:")
+    print(f"  Plain text : {OUTPUT_TXT}")
+    print(f"  Markdown   : {OUTPUT_MD}")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # Verify knowledge base exists
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(
+            "Knowledge base not found. Please run step6a_ingest_reports.py first."
+        )
+
+    # Initialize ChromaDB
+    print("Connecting to knowledge base...")
+    client     = chromadb.PersistentClient(path=DB_PATH)
+    embedder   = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=EMBEDDING_MODEL
+    )
+    collection = client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=embedder
+    )
+    print(f"  Knowledge base contains {collection.count():,} chunks\n")
+
+    if collection.count() == 0:
+        raise ValueError("Knowledge base is empty. "
+                         "Please run step6a_ingest_reports.py and add report files first.")
+
+    # Step 1: Load sentiment results
+    sentiment_results = load_sentiment_results()
+
+    # Step 2: Retrieve style examples via RAG
+    style_examples = retrieve_style_examples(sentiment_results, collection)
+
+    # Step 3: Build prompt combining data + style
+    prompt = build_generation_prompt(sentiment_results, style_examples)
+
+    # Step 4: Generate report
+    report_text = generate_report(prompt)
+
+    # Step 5: Save outputs
+    save_report(report_text, sentiment_results)
+
+    # Preview first 500 characters
+    print("\nReport Preview:")
+    print("─" * 65)
+    print(report_text[:500] + "...")
+    print("─" * 65)
+    print("\nRAG-based report generation complete!")
