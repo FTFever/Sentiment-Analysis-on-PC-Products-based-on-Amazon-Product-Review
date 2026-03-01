@@ -1,31 +1,20 @@
 # Sentiment-Analysis-on-PC-Products-based-on-Amazon-Product-Review
 💻 PC Product Sentiment Analyzer
-
 End-to-End Local NLP Pipeline for Business-Ready Insights
-
 Amazon Electronics Reviews | Python | DistilBERT | Mistral 7B | RAG | Fully Local Inference
 
 📌 Project Overview
 
-This project builds a fully local, end-to-end sentiment analysis system for Amazon PC product reviews.
-
-It answers two key business questions:
-
-What is the overall customer attitude toward PC products?
-
-Which specific product aspects drive positive or negative reactions?
+This project builds a fully local, end-to-end sentiment analysis system for Amazon PC product reviews. It answers two key business questions:      
+- What is the overall customer attitude toward PC products?
+- Which specific product aspects drive positive or negative reactions?
 
 The system processes raw review data and produces:
-
-Fine-tuned sentiment classification model
-
-Aspect-level sentiment analysis
-
-Evidence-grounded business insights
-
-Visual dashboard
-
-RAG-styled executive report matching company writing style
+1. Fine-tuned sentiment classification model
+2. Aspect-level sentiment analysis
+3. Evidence-grounded business insights
+4. Visual dashboard
+5. RAG-styled executive report matching company's writing style
 
 ⚡ No paid APIs used. All models run locally.
 
@@ -48,34 +37,19 @@ RAG Style Injection via ChromaDB
 
 🚀 Pipeline Steps
 1️⃣ Data Loading & Filtering
-
-Chunk-based reading of 3.5GB TSV file
-
-Filter for PC category
-
-Early stop at 10,000 records
-
-Handles malformed rows safely
-
+- Chunk-based reading of 3.5GB TSV file
+- Filter for PC category
+- Early stop at 10,000 records
+- Handles malformed rows safely
 Tools: pandas
 
 2️⃣ Data Preprocessing
-
-HTML cleaning
-
-Combine headline + body
-
-Star rating → sentiment mapping:
-
-1–2 ⭐ → Negative
-
-3 ⭐ → Neutral
-
-4–5 ⭐ → Positive
-
-Class balancing (over/undersampling)
-
-Stratified 70/15/15 split
+- HTML cleaning
+- Combine headline + body
+- Star rating → sentiment mapping:
+- 1–2 ⭐ → Negative; 3 ⭐ → Neutral; 4–5 ⭐ → Positive
+- Class balancing (over/undersampling)
+- Stratified 70/15/15 split
 
 Tools: pandas, scikit-learn, regex
 
