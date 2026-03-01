@@ -72,19 +72,13 @@ HuggingFace Transformers, PyTorch, scikit-learn
 Tools: Ollama, Mistral 7B, tqdm
 
 5️⃣ Business Insights & Dashboard
-Generates:
 - Overall sentiment distribution
-
-Aspect-level rankings
-
-Key findings
-
-Actionable recommendations
-
-📈 Dashboard (pie chart, bar chart, heatmap)
+- Aspect-level rankings
+- Key findings
+- Actionable recommendations
+- 📈 Dashboard (pie chart, bar chart, heatmap)
 
 Two core business sections:
-
 ✅ What Customers Love
 Extracted positive quotes      
         - Ranked by approval rate
@@ -108,19 +102,6 @@ Process:
 Tools:
 ChromaDB, SentenceTransformers, pypdf, python-docx
 
-🛠️ Tech Stack
-Tool	Purpose
-pandas	Data processing
-scikit-learn	Sampling, splitting, metrics
-PyTorch	Model training
-HuggingFace	DistilBERT fine-tuning
-Ollama	Local LLM server
-Mistral 7B	Aspect extraction & report generation
-ChromaDB	Vector database
-SentenceTransformers	Embeddings
-matplotlib / seaborn	Visualizations
-tqdm	Batch processing
-regex	Cleaning & JSON extraction
 
 💡 Business Value
 This system transforms raw customer reviews into:
