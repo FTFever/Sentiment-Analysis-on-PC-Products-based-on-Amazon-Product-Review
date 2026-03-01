@@ -1,0 +1,252 @@
+"""
+STEP 6a: Document Ingestion — Build RAG Knowledge Base
+--------------------------------------------------------
+Purpose : Processes your existing company reports, converts them into
+          vector embeddings, and stores them in a local ChromaDB vector
+          database for retrieval during report generation.
+
+Supported file formats:
+  - PDF  (.pdf)
+  - Word (.docx)
+  - Text (.txt)
+
+Prerequisites:
+  pip install chromadb sentence-transformers pypdf python-docx tqdm
+
+Input   : Folder containing your existing company reports
+Output  : Local ChromaDB vector database (./report_knowledge_base/)
+"""
+
+import os
+import re
+import chromadb
+from chromadb.utils import embedding_functions
+from sentence_transformers import SentenceTransformer
+from tqdm import tqdm
+import hashlib
+
+# PDF and Word support
+try:
+    from pypdf import PdfReader
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
+    print("Warning: pypdf not installed. PDF files will be skipped.")
+
+try:
+    from docx import Document as DocxDocument
+    DOCX_SUPPORT = True
+except ImportError:
+    DOCX_SUPPORT = False
+    print("Warning: python-docx not installed. DOCX files will be skipped.")
+
+
+# ── Configuration ────────────────────────────────────────────────────────────
+REPORTS_FOLDER   = "./company_reports"    # Folder containing your uploaded reports
+DB_PATH          = "./report_knowledge_base"  # Where ChromaDB stores the vector database
+COLLECTION_NAME  = "company_reports"
+EMBEDDING_MODEL  = "all-MiniLM-L6-v2"    # Lightweight local embedding model
+
+# Chunking settings
+CHUNK_SIZE       = 500     # Characters per chunk
+CHUNK_OVERLAP    = 100     # Overlap between chunks to preserve context
+MIN_CHUNK_LENGTH = 100     # Ignore chunks shorter than this (likely noise)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── Text Extraction ───────────────────────────────────────────────────────────
+
+def extract_text_from_pdf(filepath):
+    """Extracts all text from a PDF file."""
+    if not PDF_SUPPORT:
+        return ""
+    try:
+        reader = PdfReader(filepath)
+        text   = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return text.strip()
+    except Exception as e:
+        print(f"  Warning: Could not read PDF {filepath}: {e}")
+        return ""
+
+
+def extract_text_from_docx(filepath):
+    """Extracts all text from a Word document."""
+    if not DOCX_SUPPORT:
+        return ""
+    try:
+        doc  = DocxDocument(filepath)
+        text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        return text.strip()
+    except Exception as e:
+        print(f"  Warning: Could not read DOCX {filepath}: {e}")
+        return ""
+
+
+def extract_text_from_txt(filepath):
+    """Extracts text from a plain text file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"  Warning: Could not read TXT {filepath}: {e}")
+        return ""
+
+
+def extract_text(filepath):
+    """Routes to the correct extractor based on file extension."""
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == '.pdf':
+        return extract_text_from_pdf(filepath)
+    elif ext == '.docx':
+        return extract_text_from_docx(filepath)
+    elif ext == '.txt':
+        return extract_text_from_txt(filepath)
+    else:
+        print(f"  Skipping unsupported file type: {filepath}")
+        return ""
+
+
+# ── Text Chunking ─────────────────────────────────────────────────────────────
+
+def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
+    """
+    Splits a long document into overlapping chunks.
+    Overlap ensures context is not lost at chunk boundaries.
+    For example with chunk_size=500 and overlap=100:
+      Chunk 1: characters 0–500
+      Chunk 2: characters 400–900
+      Chunk 3: characters 800–1300
+      ...
+    """
+    # Clean up excessive whitespace
+    text   = re.sub(r'\n{3,}', '\n\n', text)
+    text   = re.sub(r' {2,}', ' ', text)
+
+    chunks = []
+    start  = 0
+
+    while start < len(text):
+        end   = start + chunk_size
+        chunk = text[start:end]
+
+        # Try to break at a sentence boundary for cleaner chunks
+        if end < len(text):
+            last_period = chunk.rfind('.')
+            last_newline = chunk.rfind('\n')
+            break_point  = max(last_period, last_newline)
+            if break_point > chunk_size * 0.5:   # Only break if boundary is in latter half
+                chunk = text[start:start + break_point + 1]
+                end   = start + break_point + 1
+
+        if len(chunk.strip()) >= MIN_CHUNK_LENGTH:
+            chunks.append(chunk.strip())
+
+        start = end - overlap   # Move back by overlap amount for next chunk
+
+    return chunks
+
+
+# ── Vector Database ───────────────────────────────────────────────────────────
+
+def initialize_db():
+    """Initializes the ChromaDB client and collection."""
+    client     = chromadb.PersistentClient(path=DB_PATH)
+    embedder   = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=EMBEDDING_MODEL
+    )
+    collection = client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=embedder,
+        metadata={"hnsw:space": "cosine"}   # Cosine similarity for text
+    )
+    return client, collection
+
+
+def generate_chunk_id(filepath, chunk_index):
+    """Generates a unique ID for each chunk based on file path and position."""
+    raw = f"{filepath}_{chunk_index}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+# ── Ingestion Pipeline ────────────────────────────────────────────────────────
+
+def ingest_reports(reports_folder, collection):
+    """
+    Processes all supported documents in the reports folder,
+    chunks them, and stores them in ChromaDB.
+    """
+    supported_extensions = {'.pdf', '.docx', '.txt'}
+    files = [
+        f for f in os.listdir(reports_folder)
+        if os.path.splitext(f)[1].lower() in supported_extensions
+    ]
+
+    if not files:
+        raise ValueError(f"No supported files found in '{reports_folder}'. "
+                         "Please add PDF, DOCX, or TXT report files.")
+
+    print(f"Found {len(files)} report files to process\n")
+    total_chunks = 0
+
+    for filename in tqdm(files, desc="Processing reports"):
+        filepath = os.path.join(reports_folder, filename)
+
+        # Extract text
+        text = extract_text(filepath)
+        if not text:
+            print(f"  Skipping {filename} — no text extracted")
+            continue
+
+        # Chunk text
+        chunks = chunk_text(text)
+        if not chunks:
+            print(f"  Skipping {filename} — no valid chunks produced")
+            continue
+
+        # Prepare data for ChromaDB
+        ids        = [generate_chunk_id(filepath, i) for i in range(len(chunks))]
+        metadatas  = [{"source": filename, "chunk_index": i,
+                       "total_chunks": len(chunks)} for i in range(len(chunks))]
+
+        # Check for existing chunks to avoid duplicates
+        existing = collection.get(ids=ids)['ids']
+        new_mask = [id_ not in existing for id_ in ids]
+
+        new_ids       = [ids[i]       for i, m in enumerate(new_mask) if m]
+        new_chunks    = [chunks[i]    for i, m in enumerate(new_mask) if m]
+        new_metadatas = [metadatas[i] for i, m in enumerate(new_mask) if m]
+
+        if new_ids:
+            collection.add(documents=new_chunks, ids=new_ids, metadatas=new_metadatas)
+            total_chunks += len(new_ids)
+
+        print(f"  {filename}: {len(chunks)} chunks "
+              f"({len(new_ids)} new, {len(chunks)-len(new_ids)} already existed)")
+
+    return total_chunks
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # Create reports folder if it doesn't exist
+    os.makedirs(REPORTS_FOLDER, exist_ok=True)
+
+    # Check if reports folder has any files
+    if not os.listdir(REPORTS_FOLDER):
+        print(f"Please add your company report files to: {REPORTS_FOLDER}/")
+        print("Supported formats: PDF, DOCX, TXT")
+        exit(0)
+
+    print("Initializing vector database...")
+    client, collection = initialize_db()
+    print(f"  Database location : {DB_PATH}")
+    print(f"  Embedding model   : {EMBEDDING_MODEL}\n")
+
+    print("Ingesting reports into knowledge base...")
+    total_chunks = ingest_reports(REPORTS_FOLDER, collection)
+
+    print(f"\nIngestion complete!")
+    print(f"  Total chunks stored : {total_chunks:,}")
+    print(f"  Total in database   : {collection.count():,}")
+    print(f"\nKnowledge base is ready for report generation (Step 6b)")
